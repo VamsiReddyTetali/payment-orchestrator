@@ -13,9 +13,11 @@ erDiagram
 
     PAYMENTS {
         varchar id PK
+        varchar order_id FK
         varchar status "pending | success | failed"
         int amount
-        boolean captured
+        boolean captured "DEFAULT false"
+        timestamp created_at
     }
     
     REFUNDS {

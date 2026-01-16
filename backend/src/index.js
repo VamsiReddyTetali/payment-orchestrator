@@ -13,7 +13,7 @@ app.use(express.json());
 app.use(cors());
 app.use(morgan('dev'));
 
-// --- NEW: LOGIN ENDPOINT (Public) ---
+// --- LOGIN ENDPOINT (Public) ---
 app.post('/api/v1/login', async (req, res) => {
     const { email, secret } = req.body;
 
@@ -22,7 +22,6 @@ app.post('/api/v1/login', async (req, res) => {
             return res.status(400).json({ error: 'Email and Secret are required' });
         }
 
-        // Logic: Find merchant matching BOTH email and api_secret
         const result = await pool.query(
             "SELECT * FROM merchants WHERE email = $1 AND api_secret = $2",
             [email, secret]
@@ -32,7 +31,6 @@ app.post('/api/v1/login', async (req, res) => {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
-        // Return the merchant details
         res.json(result.rows[0]);
 
     } catch (err) {
@@ -81,10 +79,8 @@ const checkIdempotency = async (req, res, next) => {
         if (result.rows.length > 0) {
             const record = result.rows[0];
             if (new Date() < new Date(record.expires_at)) {
-                // Return cached response
                 return res.status(record.response.status || 200).json(record.response.body);
             } else {
-                // Expired: delete and process new
                 await pool.query('DELETE FROM idempotency_keys WHERE key = $1 AND merchant_id = $2', [key, req.merchant.id]);
             }
         }
@@ -92,7 +88,7 @@ const checkIdempotency = async (req, res, next) => {
         next();
     } catch (err) {
         console.error("Idempotency Check Error", err);
-        next(); // Fallback to normal processing on error
+        next();
     }
 };
 
@@ -162,7 +158,6 @@ app.get('/api/v1/orders', authenticate, async (req, res) => {
   }
 });
 
-
 // --- 3. Get Order (Public/Private shared logic) ---
 app.get('/api/v1/orders/:orderId', authenticate, async (req, res) => {
   try {
@@ -229,12 +224,12 @@ const processPaymentRequest = async (req, res, isPublic = false) => {
 
         // 3. Create Payment Record (Pending)
         const paymentId = generateId('pay_');
-        const status = 'pending'; // Async flow starts as pending
+        const status = 'pending'; 
 
         const insertQuery = `
           INSERT INTO payments 
-          (id, order_id, merchant_id, amount, currency, method, status, vpa, card_network, card_last4)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          (id, order_id, merchant_id, amount, currency, method, status, vpa, card_network, card_last4, captured)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false)
           RETURNING *
         `;
         
@@ -283,7 +278,6 @@ app.post('/api/v1/payments/:paymentId/refunds', authenticate, async (req, res) =
     const { paymentId } = req.params;
 
     try {
-        // 1. Verify Payment
         const payRes = await pool.query('SELECT * FROM payments WHERE id = $1 AND merchant_id = $2', [paymentId, req.merchant.id]);
         if (payRes.rows.length === 0) return res.status(404).json({error: "Payment not found"});
         const payment = payRes.rows[0];
@@ -292,7 +286,6 @@ app.post('/api/v1/payments/:paymentId/refunds', authenticate, async (req, res) =
             return res.status(400).json({error: {code: "BAD_REQUEST_ERROR", description: "Payment not successful"}});
         }
 
-        // 2. Check Limits
         const refRes = await pool.query("SELECT SUM(amount) as total FROM refunds WHERE payment_id = $1", [paymentId]);
         const totalRefunded = parseInt(refRes.rows[0].total || 0);
         
@@ -300,7 +293,6 @@ app.post('/api/v1/payments/:paymentId/refunds', authenticate, async (req, res) =
             return res.status(400).json({error: {code: "BAD_REQUEST_ERROR", description: "Refund amount exceeds available"}});
         }
 
-        // 3. Create Refund
         const refundId = generateId('rfnd_');
         const result = await pool.query(
             `INSERT INTO refunds (id, payment_id, merchant_id, amount, reason, status)
@@ -308,7 +300,6 @@ app.post('/api/v1/payments/:paymentId/refunds', authenticate, async (req, res) =
             [refundId, paymentId, req.merchant.id, amount, reason]
         );
 
-        // 4. Enqueue Job
         await refundQueue.add('process-refund', { refundId });
         
         res.status(201).json(result.rows[0]);
@@ -318,7 +309,45 @@ app.post('/api/v1/payments/:paymentId/refunds', authenticate, async (req, res) =
     }
 });
 
-// --- 7. Webhook Logs & Retry ---
+// --- 7. Capture Payment (NEW - Mandatory) ---
+app.post('/api/v1/payments/:id/capture', authenticate, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const paymentResult = await pool.query(
+      'SELECT * FROM payments WHERE id = $1 AND merchant_id = $2',
+      [id, req.merchant.id]
+    );
+
+    if (paymentResult.rows.length === 0) {
+      return res.status(404).json({ error: { code: "NOT_FOUND", description: "Payment not found" } });
+    }
+
+    const payment = paymentResult.rows[0];
+
+    if (payment.status !== 'success') {
+      return res.status(400).json({ error: { code: "BAD_REQUEST", description: "Payment not in capturable state" } });
+    }
+    if (payment.captured) {
+      return res.status(400).json({ error: { code: "BAD_REQUEST", description: "Payment already captured" } });
+    }
+
+    const updateQuery = `
+      UPDATE payments 
+      SET captured = true, updated_at = NOW() 
+      WHERE id = $1 
+      RETURNING *
+    `;
+    const updatedPayment = await pool.query(updateQuery, [id]);
+
+    res.json(updatedPayment.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: { code: "INTERNAL_ERROR", description: "Capture failed" } });
+  }
+});
+
+// --- 8. Webhook Logs & Retry ---
 app.get('/api/v1/webhooks', authenticate, async (req, res) => {
     const { limit = 10, offset = 0 } = req.query;
     try {
@@ -333,15 +362,12 @@ app.get('/api/v1/webhooks', authenticate, async (req, res) => {
 app.post('/api/v1/webhooks/:logId/retry', authenticate, async (req, res) => {
     const { logId } = req.params;
     try {
-        // Verify ownership
         const logRes = await pool.query('SELECT * FROM webhook_logs WHERE id = $1 AND merchant_id = $2', [logId, req.merchant.id]);
         if (logRes.rows.length === 0) return res.status(404).json({error: "Log not found"});
 
         const log = logRes.rows[0];
-        // Reset status
         await pool.query("UPDATE webhook_logs SET status = 'pending', attempts = 0 WHERE id = $1", [logId]);
         
-        // Re-enqueue
         await webhookQueue.add('deliver-webhook', {
             logId, 
             merchantId: log.merchant_id, 
@@ -352,21 +378,19 @@ app.post('/api/v1/webhooks/:logId/retry', authenticate, async (req, res) => {
     } catch (e) { res.status(500).json({ error: "Server Error" }); }
 });
 
-// --- 8. Test Jobs Status ---
+// --- 9. Test Jobs Status (NEW - Required for Evaluation) ---
 app.get('/api/v1/test/jobs/status', async (req, res) => {
     try {
-        // Fetch counts using the correct BullMQ methods
-        const pending = (await paymentQueue.getWaitingCount()) + (await webhookQueue.getWaitingCount());
-        const active = (await paymentQueue.getActiveCount()) + (await webhookQueue.getActiveCount());
-        
-        const completed = await paymentQueue.getCompletedCount(); 
-        const failed = await paymentQueue.getFailedCount();
+        const paymentPending = await paymentQueue.getWaitingCount();
+        const paymentActive = await paymentQueue.getActiveCount();
+        const paymentCompleted = await paymentQueue.getCompletedCount(); 
+        const paymentFailed = await paymentQueue.getFailedCount();
 
         res.json({
-            pending,
-            processing: active,
-            completed,
-            failed,
+            pending: paymentPending,
+            processing: paymentActive,
+            completed: paymentCompleted,
+            failed: paymentFailed,
             worker_status: "running"
         });
     } catch (e) { 

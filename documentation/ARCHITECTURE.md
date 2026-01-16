@@ -43,3 +43,9 @@ graph TD
 - Consumes jobs sequentially from Redis.
 - **Simulation:** Introduces artificial delays (5 seconds) and randomizes success/failure outcomes (80% success rate) to model real-world banking network behavior.
 - **Reliability:** Failed webhooks are re-queued for later attempts using an exponential backoff algorithm.
+
+### Test & Evaluation Mode
+To comply with automated evaluation requirements, the system supports specific environment variables:
+
+* [cite_start]**TEST_MODE=true**: Forces deterministic behavior in the worker (e.g., fixed delays, specific success rates)[cite: 155].
+* **WEBHOOK_RETRY_INTERVALS_TEST=true**: Overrides the standard retry schedule (1m, 5m, 30m) with a rapid schedule (5s, 10s, 15s) to allow full retry cycle testing in under 1 minute.
