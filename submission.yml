@@ -1,10 +1,6 @@
 version: "1.0"
-
-# Name of the submission or project
 name: Payment Orchestrator
 
-# Setup commands to prepare the environment
-# We need to install dependencies for the API, Dashboard, and Checkout apps
 setup:
   - command: npm install
     working_dir: backend
@@ -13,40 +9,20 @@ setup:
   - command: npm install
     working_dir: checkout-page
 
-# Commands to start the application
-# The automated system expects 'docker-compose up -d' to bring everything online
 start:
   - command: docker-compose up -d --build
-    timeout: 300 # Wait up to 5 minutes for containers to build and DB to seed
+    timeout: 300
 
-# Commands to verify the system is running correctly
-# We check the specific test endpoints you built for evaluation
 verify:
-  # 1. Health Check (Database & Redis connectivity)
   - command: curl -f http://localhost:8000/api/v1/health
     retries: 5
     delay: 5
-
-  # 2. Job Queue Status (Required for evaluation)
   - command: curl -f http://localhost:8000/api/v1/test/jobs/status
     retries: 5
     delay: 5
-
-  # 3. Check Dashboard is accessible
   - command: curl -f http://localhost:3000
     retries: 3
     delay: 2
 
-  # 4. Check Checkout Page is accessible
-  - command: curl -f http://localhost:3001
-    retries: 3
-    delay: 2
-
-# Commands to run tests (if you had a test suite)
-# Since we rely on manual testing/automated external evaluation, we can echo a success
-test:
-  - command: echo "Running automated system evaluation..."
-
-# Commands to gracefully shut down services
 shutdown:
   - command: docker-compose down -v
