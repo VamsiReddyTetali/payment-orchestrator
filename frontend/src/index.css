@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom spinner for payment processing */
+.spinner {
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+}

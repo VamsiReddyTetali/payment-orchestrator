@@ -1,0 +1,23 @@
+{
+  "name": "payment-gateway",
+  "version": "1.0.0",
+  "description": "This is a full-stack Payment Gateway simulation built as a capstone project. It mimics the core functionalities of platforms like Razorpay or Stripe, allowing merchants to generate orders and customers to make payments via a hosted checkout page.",
+  "main": "Webhook-test.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VamsiReddyTetali/payment-gateway.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/VamsiReddyTetali/payment-gateway/issues"
+  },
+  "homepage": "https://github.com/VamsiReddyTetali/payment-gateway#readme",
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}
